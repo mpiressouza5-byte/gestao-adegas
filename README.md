@@ -45,3 +45,10 @@ Etapa 03 — primeira integração com Supabase. Etapa 04 implementa o primeiro 
 
 ## Etapa 04.2 — Resolução de códigos de barras
 Consulta em cascata: catálogo Supabase, catálogo auxiliar, ProductGuru, Open Food Facts v3 e enriquecimento por ELID.wine. O Nginx usa proxy same-origin para as APIs externas. Consulte `docs/ETAPA-04-2.md` para limites, licenças, proveniência e testes.
+
+
+## Etapa 05 — edição e fotografia dos rótulos
+- Edição de dados do vinho e do lote diretamente na lista do Estoque.
+- Captura/seleção de foto do rótulo em celulares e upload autenticado para o bucket privado `wine-images`.
+- URLs assinadas para exibir fotos privadas; ajuste de quantidade com registro em `stock_movements`.
+- Consulte `docs/ETAPA-05.md` para escopo, segurança e testes.

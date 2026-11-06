@@ -123,9 +123,12 @@ type InventoryRow = {
   id: string; cellar_id: string; wine_id: string; vintage: number | null;
   quantity: number; unit_cost: number; cellars?: { name: string } | null;
   wines?: {
-    id: string; name: string; wine_type: string | null; region: string | null;
-    grapes: string[]; countries?: { name: string; flag_emoji: string | null } | null;
-    wine_barcodes?: { barcode: string }[]; wine_images?: { image_path: string }[];
+    id: string; name: string; producer_id: string | null; country_id: number | null;
+    wine_type: string | null; region: string | null; grapes: string[];
+    source_name?: string | null;
+    countries?: { name: string; flag_emoji: string | null } | null;
+    wine_barcodes?: { barcode: string }[];
+    wine_images?: { image_path: string; image_url?: string; is_primary?: boolean; alt_text?: string | null }[];
   } | null;
 };
 
@@ -203,6 +206,11 @@ function App() {
   const [existingWineId, setExistingWineId] = useState<string|null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupMessage, setLookupMessage] = useState('');
+  const [editingLotId, setEditingLotId] = useState<string|null>(null);
+  const [imageFile, setImageFile] = useState<File|null>(null);
+  const [imagePreview, setImagePreview] = useState('');
+  const [originalImagePreview, setOriginalImagePreview] = useState('');
+  const [currentImagePath, setCurrentImagePath] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -222,14 +230,29 @@ function App() {
       supabase.from('cellars').select('id,name,description,is_default,is_active,created_at').order('is_default',{ascending:false}).order('name'),
       supabase.from('profiles').select('full_name').single(),
       supabase.from('countries').select('id,iso2,name,flag_emoji').order('name'),
-      supabase.from('inventory_lots').select('id,cellar_id,wine_id,vintage,quantity,unit_cost,cellars(name),wines(id,name,wine_type,region,grapes,countries(name,flag_emoji),wine_barcodes(barcode),wine_images(image_path))').order('created_at',{ascending:false}),
+      supabase.from('inventory_lots').select('id,cellar_id,wine_id,vintage,quantity,unit_cost,cellars(name),wines(id,name,producer_id,country_id,wine_type,region,grapes,source_name,countries(name,flag_emoji),wine_barcodes(barcode),wine_images(image_path,alt_text,is_primary))').order('created_at',{ascending:false}),
     ]);
     if (cellarError) setError(`Não foi possível carregar suas adegas: ${cellarError.message}`);
     else setCellars((cellarData||[]) as Cellar[]);
     if (!profileError) setProfileName(profileData?.full_name||'');
     if (!countryError) setCountries((countryData||[]) as Country[]);
     if (lotError) setError(`Não foi possível carregar o estoque: ${lotError.message}`);
-    else setInventory((lotData||[]) as unknown as InventoryRow[]);
+    else {
+      const rows = await Promise.all((lotData||[]).map(async (raw: any) => {
+        const row = raw as InventoryRow;
+        if (!row.wines?.wine_images?.length) return row;
+        const images = await Promise.all(row.wines.wine_images.map(async image => {
+          if (!image.image_path) return {...image, image_url:''};
+          if (/^https?:\/\//i.test(image.image_path)) return {...image, image_url:image.image_path};
+          const {data:signed,error:signedError} = await supabase.storage.from('wine-images').createSignedUrl(image.image_path, 3600);
+          if (signedError) console.warn('Não foi possível gerar URL da imagem:', signedError.message);
+          return {...image, image_url:signed?.signedUrl || ''};
+        }));
+        images.sort((a,b)=>Number(Boolean(b.is_primary))-Number(Boolean(a.is_primary)));
+        return {...row,wines:{...row.wines,wine_images:images}};
+      }));
+      setInventory(rows);
+    }
     setLoading(false);
   }
 
@@ -268,8 +291,52 @@ function App() {
   function openNewLot() {
     setError(''); setNotice('');
     setDraft(emptyDraft()); setExistingWineId(null); setLookupMessage('');
+    setEditingLotId(null); setImageFile(null); setImagePreview(''); setOriginalImagePreview(''); setCurrentImagePath('');
     setSelectedCellarId(inventoryCellarFilter !== 'all' ? inventoryCellarFilter : (cellars[0]?.id || ''));
     setShowWineModal(true);
+  }
+
+  async function openEditLot(row: InventoryRow) {
+    if (!row.wines) return;
+    setError(''); setNotice(''); setLookupMessage('');
+    let producerName = '';
+    if (row.wines.producer_id) {
+      const {data:producer,error:producerError} = await supabase.from('wine_producers').select('name').eq('id',row.wines.producer_id).maybeSingle();
+      if (producerError) { setError(`Não foi possível carregar o produtor: ${producerError.message}`); return; }
+      producerName = producer?.name || '';
+    }
+    const primaryImage = row.wines.wine_images?.[0];
+    setDraft({
+      ...emptyDraft(),
+      name:row.wines.name,
+      producer:producerName,
+      countryId:row.wines.country_id ? String(row.wines.country_id) : '',
+      wineType:row.wines.wine_type || 'Tinto',
+      region:row.wines.region || '',
+      grapes:(row.wines.grapes || []).join(', '),
+      vintage:row.vintage ? String(row.vintage) : '',
+      quantity:row.quantity,
+      unitCost:String(row.unit_cost ?? ''),
+      barcode:row.wines.wine_barcodes?.[0]?.barcode || '',
+      sourceName:row.wines.source_name || 'Cadastro manual',
+    });
+    setExistingWineId(row.wine_id);
+    setEditingLotId(row.id);
+    setSelectedCellarId(row.cellar_id);
+    setImageFile(null);
+    setImagePreview(primaryImage?.image_url || '');
+    setOriginalImagePreview(primaryImage?.image_url || '');
+    setCurrentImagePath(primaryImage?.image_path || '');
+    setShowWineModal(true);
+  }
+
+  function selectWineImage(file?: File) {
+    if (!file) return;
+    if (!['image/jpeg','image/png','image/webp'].includes(file.type)) { setError('Formato não aceito. Use JPG, PNG ou WEBP.'); return; }
+    if (file.size > 5 * 1024 * 1024) { setError('A imagem deve ter no máximo 5 MB.'); return; }
+    setError('');
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
   }
 
   async function lookupBarcode(rawCode: string) {
@@ -311,6 +378,7 @@ function App() {
         const country = countries.find(c => c.iso2.trim().toUpperCase() === fallback.iso2);
         setExistingWineId(null);
         setDraft(d => ({...d,name:fallback.name,producer:fallback.producer,countryId:country?String(country.id):'',wineType:fallback.wineType,region:fallback.region,grapes:fallback.grapes.join(', '),imageUrl:fallback.imageUrl,barcode:code,sourceName:fallback.source}));
+        setImagePreview(fallback.imageUrl);
         setLookupMessage(`Rótulo identificado em catálogo verificado (${fallback.source}). Confira os dados antes de salvar.`);
         return;
       }
@@ -341,17 +409,45 @@ function App() {
         barcode:code,
         sourceName:result.sources.join(' + '),
       }));
+      if (result.imageUrl) setImagePreview(result.imageUrl);
       setLookupMessage(`${result.name ? 'Produto identificado' : 'Encontramos alguns dados do produto'} em: ${result.sources.join(', ')}. Confirme os campos; dados não confirmados podem estar incompletos.`);
     } catch (err) {
       setLookupMessage(`As consultas externas falharam: ${err instanceof Error?err.message:'erro desconhecido'}. O código foi preservado; você pode preencher os dados manualmente.`);
     } finally { setLookupBusy(false); }
   }
 
+  async function saveWineImage(wineId: string) {
+    if (!imageFile) return;
+    const extension = imageFile.type === 'image/png' ? 'png' :
+      imageFile.type === 'image/webp' ? 'webp' : 'jpg';
+    const objectPath = `${session!.user.id}/wines/${wineId}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+    const {error:uploadError} = await supabase.storage.from('wine-images').upload(objectPath,imageFile,{
+      contentType:imageFile.type,
+      cacheControl:'3600',
+      upsert:false,
+    });
+    if (uploadError) throw new Error(`Falha ao enviar foto para o Supabase Storage: ${uploadError.message}`);
+
+    const {data:newImage,error:imageInsertError} = await supabase.from('wine_images').insert({
+      wine_id:wineId,
+      user_id:session!.user.id,
+      image_path:objectPath,
+      alt_text:`Rótulo de ${draft.name.trim()}`,
+      is_primary:true,
+    }).select('id').single();
+    if (imageInsertError) throw new Error(`Foto enviada, mas não foi possível registrar no catálogo: ${imageInsertError.message}`);
+
+    const {error:oldImagesError} = await supabase.from('wine_images')
+      .update({is_primary:false}).eq('wine_id',wineId).neq('id',newImage.id);
+    if (oldImagesError) console.warn('A nova foto foi salva, mas não foi possível desmarcar imagens anteriores:',oldImagesError.message);
+  }
+
   async function saveWineLot(e: FormEvent) {
     e.preventDefault();
+    const isEditing = Boolean(editingLotId && existingWineId);
     if (!selectedCellarId) { setError('Selecione a adega que receberá as garrafas.'); return; }
     if (!draft.name.trim()) { setError('Informe o nome do rótulo.'); return; }
-    if (!draft.barcode || !/^\d{8,14}$/.test(draft.barcode)) { setError('Informe ou leia um código de barras válido (8 a 14 dígitos).'); return; }
+    if (!isEditing && draft.barcode && !/^\d{8,14}$/.test(draft.barcode)) { setError('O código de barras deve ter de 8 a 14 dígitos ou ficar em branco.'); return; }
     if (!Number.isInteger(draft.quantity) || draft.quantity < 1) { setError('A quantidade deve ser de pelo menos uma garrafa.'); return; }
     const unitCost = Number(draft.unitCost.replace(',','.'));
     if (!draft.unitCost.trim() || !Number.isFinite(unitCost) || unitCost < 0) { setError('Informe um preço pago por garrafa válido.'); return; }
@@ -360,43 +456,94 @@ function App() {
     setSaving(true); setError(''); setNotice('');
     try {
       let wineId = existingWineId;
-      if (!wineId) {
-        let producerId: string | null = null;
-        if (draft.producer.trim()) {
-          const {data:existingProducer,error:producerLookupError} = await supabase.from('wine_producers').select('id').eq('user_id',session!.user.id).ilike('name',draft.producer.trim()).maybeSingle();
-          if (producerLookupError) throw producerLookupError;
-          if (existingProducer) producerId = existingProducer.id;
-          else {
-            const {data:newProducer,error:newProducerError} = await supabase.from('wine_producers').insert({user_id:session!.user.id,name:draft.producer.trim(),country_id:draft.countryId?Number(draft.countryId):null}).select('id').single();
-            if (newProducerError) throw newProducerError;
-            producerId = newProducer.id;
-          }
-        }
-        const {data:newWine,error:wineError} = await supabase.from('wines').insert({
-          user_id:session!.user.id,name:draft.name.trim(),producer_id:producerId,
-          country_id:draft.countryId?Number(draft.countryId):null,wine_type:draft.wineType,
-          region:draft.region.trim()||null,grapes:draft.grapes.split(',').map(v=>v.trim()).filter(Boolean),
-          source_name:draft.sourceName || 'Cadastro manual',source_product_id:draft.barcode,
-        }).select('id').single();
-        if (wineError) throw wineError;
-        wineId = newWine.id;
-        const {error:barcodeInsertError} = await supabase.from('wine_barcodes').insert({wine_id:wineId,barcode:draft.barcode,barcode_type:'EAN/UPC',is_primary:true});
-        if (barcodeInsertError) throw barcodeInsertError;
-        if (draft.imageUrl.trim()) {
-          const {error:imageError} = await supabase.from('wine_images').insert({wine_id:wineId,user_id:session!.user.id,image_path:draft.imageUrl.trim(),alt_text:`Garrafa de ${draft.name.trim()}`,is_primary:true});
-          if (imageError) throw imageError;
+      let producerId: string | null = null;
+      if (draft.producer.trim()) {
+        const {data:existingProducer,error:producerLookupError} = await supabase.from('wine_producers')
+          .select('id').eq('user_id',session!.user.id).ilike('name',draft.producer.trim()).maybeSingle();
+        if (producerLookupError) throw producerLookupError;
+        if (existingProducer) producerId = existingProducer.id;
+        else {
+          const {data:newProducer,error:newProducerError} = await supabase.from('wine_producers').insert({
+            user_id:session!.user.id,name:draft.producer.trim(),
+            country_id:draft.countryId?Number(draft.countryId):null,
+          }).select('id').single();
+          if (newProducerError) throw newProducerError;
+          producerId = newProducer.id;
         }
       }
-      const {data:newLot,error:lotError} = await supabase.from('inventory_lots').insert({
-        user_id:session!.user.id,cellar_id:selectedCellarId,wine_id:wineId,
-        vintage,quantity:draft.quantity,unit_cost:unitCost,
-      }).select('id').single();
-      if (lotError) throw lotError;
-      const {error:movementError} = await supabase.from('stock_movements').insert({
-        user_id:session!.user.id,lot_id:newLot.id,movement_type:'opening_balance',quantity:draft.quantity,unit_cost:unitCost,notes:'Cadastro inicial do lote pelo inventário',
-      });
-      if (movementError) console.warn('Lote salvo; histórico inicial não foi registrado:',movementError.message);
-      setShowWineModal(false); setShowScanner(false); setNotice('Vinho e lote adicionados ao estoque.'); setActiveTab('inventory');
+
+      if (isEditing && wineId && editingLotId) {
+        const {error:wineUpdateError} = await supabase.from('wines').update({
+          name:draft.name.trim(),producer_id:producerId,
+          country_id:draft.countryId?Number(draft.countryId):null,
+          wine_type:draft.wineType,region:draft.region.trim()||null,
+          grapes:draft.grapes.split(',').map(v=>v.trim()).filter(Boolean),
+        }).eq('id',wineId);
+        if (wineUpdateError) throw wineUpdateError;
+
+        const {error:lotUpdateError} = await supabase.from('inventory_lots').update({
+          cellar_id:selectedCellarId,vintage,quantity:draft.quantity,unit_cost:unitCost,
+        }).eq('id',editingLotId);
+        if (lotUpdateError) throw lotUpdateError;
+
+        const originalLot = inventory.find(item => item.id === editingLotId);
+        const previousQuantity = originalLot?.quantity ?? draft.quantity;
+        const quantityDifference = draft.quantity - previousQuantity;
+        if (quantityDifference !== 0) {
+          const {error:adjustmentError} = await supabase.from('stock_movements').insert({
+            user_id:session!.user.id,
+            lot_id:editingLotId,
+            movement_type:quantityDifference > 0 ? 'adjustment_in' : 'adjustment_out',
+            quantity:Math.abs(quantityDifference),
+            unit_cost:unitCost,
+            notes:'Ajuste de quantidade realizado na edição do lote',
+          });
+          if (adjustmentError) console.warn('Quantidade atualizada, mas o histórico do ajuste não foi registrado:',adjustmentError.message);
+        }
+
+        await saveWineImage(wineId);
+        setNotice('Cadastro do vinho e dados do lote atualizados.');
+      } else {
+        if (!wineId) {
+          const {data:newWine,error:wineError} = await supabase.from('wines').insert({
+            user_id:session!.user.id,name:draft.name.trim(),producer_id:producerId,
+            country_id:draft.countryId?Number(draft.countryId):null,wine_type:draft.wineType,
+            region:draft.region.trim()||null,grapes:draft.grapes.split(',').map(v=>v.trim()).filter(Boolean),
+            source_name:draft.sourceName || 'Cadastro manual',source_product_id:draft.barcode || null,
+          }).select('id').single();
+          if (wineError) throw wineError;
+          wineId = newWine.id;
+          if (draft.barcode) {
+            const {error:barcodeInsertError} = await supabase.from('wine_barcodes').insert({
+              wine_id:wineId,barcode:draft.barcode,barcode_type:'EAN/UPC',is_primary:true,
+            });
+            if (barcodeInsertError) throw barcodeInsertError;
+          }
+          if (draft.imageUrl.trim() && !imageFile) {
+            const {error:imageError} = await supabase.from('wine_images').insert({
+              wine_id:wineId,user_id:session!.user.id,image_path:draft.imageUrl.trim(),
+              alt_text:`Garrafa de ${draft.name.trim()}`,is_primary:true,
+            });
+            if (imageError) throw imageError;
+          }
+          await saveWineImage(wineId);
+        }
+        const {data:newLot,error:lotError} = await supabase.from('inventory_lots').insert({
+          user_id:session!.user.id,cellar_id:selectedCellarId,wine_id:wineId,
+          vintage,quantity:draft.quantity,unit_cost:unitCost,
+        }).select('id').single();
+        if (lotError) throw lotError;
+        const {error:movementError} = await supabase.from('stock_movements').insert({
+          user_id:session!.user.id,lot_id:newLot.id,movement_type:'opening_balance',
+          quantity:draft.quantity,unit_cost:unitCost,notes:'Cadastro inicial do lote pelo inventário',
+        });
+        if (movementError) console.warn('Lote salvo; histórico inicial não foi registrado:',movementError.message);
+        setNotice('Vinho e lote adicionados ao estoque.');
+      }
+
+      setShowWineModal(false); setShowScanner(false); setEditingLotId(null);
+      setImageFile(null); setImagePreview(''); setOriginalImagePreview(''); setCurrentImagePath('');
+      setActiveTab('inventory');
       await loadData();
     } catch (err) {
       setError(`Não foi possível salvar o vinho no estoque: ${err instanceof Error?err.message:'erro desconhecido'}`);
@@ -437,8 +584,8 @@ function App() {
         <div className="inventory-toolbar"><label className="filter-field"><span>Adega</span><select value={inventoryCellarFilter} onChange={e=>setInventoryCellarFilter(e.target.value)}><option value="all">Todas as adegas</option>{cellars.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="search-field"><span>Buscar vinho ou código</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Digite o nome ou código de barras"/></label><button className="primary-button" onClick={openNewLot} disabled={!cellars.length}><Plus size={17}/> Adicionar vinho</button></div>
         <div className="inventory-summary"><div><span>Garrafas em estoque</span><strong>{totalBottles}</strong></div><div><span>Valor de aquisição</span><strong>{totalValue.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong></div><div><span>Itens / lotes</span><strong>{filteredInventory.length}</strong></div></div>
         {loading ? <div className="loading-inline"><RefreshCw className="spin"/> Carregando estoque...</div> : filteredInventory.length===0 ? <div className="empty large"><Wine size={38}/><strong>Seu estoque ainda está vazio</strong><span>Adicione um vinho escaneando o código de barras da garrafa ou preenchendo os dados manualmente.</span><button className="primary-button" onClick={openNewLot} disabled={!cellars.length}><Plus size={17}/> Adicionar primeiro vinho</button>{!cellars.length&&<small>Cadastre uma adega antes de adicionar vinhos.</small>}</div> : <div className="inventory-list">{filteredInventory.map(row=>{
-          const wine=row.wines; const imagePath=wine?.wine_images?.[0]?.image_path||'';
-          return <article className="inventory-card" key={row.id}><div className="wine-thumb">{imagePath?<img src={imagePath} alt={wine?.name||'Vinho'} onError={e=>{e.currentTarget.style.display='none';}}/>:<Wine size={30}/>}</div><div className="inventory-card-main"><h3>{wine?.name||'Rótulo sem nome'}</h3><p>{[wine?.wine_type,wine?.region].filter(Boolean).join(' · ')||'Tipo e região não informados'}</p><div className="wine-tags"><span>{wine?.countries?.flag_emoji||'🍷'} {wine?.countries?.name||'País não informado'}</span><span>{row.vintage||'Safra não informada'}</span><span>{row.cellars?.name||'Adega'}</span></div></div><div className="inventory-card-stats"><strong>{row.quantity} garrafa(s)</strong><span>{Number(row.unit_cost).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} / un.</span></div></article>;
+          const wine=row.wines; const imageUrl=wine?.wine_images?.[0]?.image_url||'';
+          return <article className="inventory-card" key={row.id}><div className="wine-thumb">{imageUrl?<img src={imageUrl} alt={wine?.name||'Vinho'} onError={e=>{e.currentTarget.style.display='none';}}/>:<Wine size={30}/>}</div><div className="inventory-card-main"><h3>{wine?.name||'Rótulo sem nome'}</h3><p>{[wine?.wine_type,wine?.region].filter(Boolean).join(' · ')||'Tipo e região não informados'}</p><div className="wine-tags"><span>{wine?.countries?.flag_emoji||'🍷'} {wine?.countries?.name||'País não informado'}</span><span>{row.vintage||'Safra não informada'}</span><span>{row.cellars?.name||'Adega'}</span></div></div><div className="inventory-card-stats"><strong>{row.quantity} garrafa(s)</strong><span>{Number(row.unit_cost).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})} / un.</span><button type="button" className="edit-wine-button" onClick={()=>void openEditLot(row)}><Pencil size={14}/> Editar vinho</button></div></article>;
         })}</div>}
       </>}
       <section className="next-step"><div><ShieldCheck/><div><strong>Seus dados estão protegidos</strong><span>Seu inventário é privado e vinculado à sua conta.</span></div></div><span>SUPABASE AUTH + RLS</span></section>
@@ -446,23 +593,26 @@ function App() {
     <nav className="bottom-nav"><button className={activeTab==='cellars'?'active':''} onClick={()=>setActiveTab('cellars')}><House/><span>Início</span></button><button className={activeTab==='cellars'?'':'active'} onClick={()=>setActiveTab('inventory')}><Wine/><span>Estoque</span></button><button onClick={openNewLot}><Plus/><span>Adicionar</span></button><button onClick={logout}><LogOut/><span>Sair</span></button></nav>
     {modal&&<div className="modal-backdrop" onClick={()=>setModal(null)}><form className="modal" onSubmit={saveCellar} onClick={e=>e.stopPropagation()}><div className="modal-head"><div><span className="eyebrow">{modal==='create'?'NOVO ESPAÇO':'CONFIGURAÇÃO'}</span><h2>{modal==='create'?'Criar adega':'Editar adega'}</h2></div><button type="button" onClick={()=>setModal(null)}><X/></button></div><label>Nome da adega<input required maxLength={80} value={name} onChange={e=>setName(e.target.value)} placeholder="Ex.: Adega Casa"/></label><label>Descrição (opcional)<textarea rows={3} maxLength={300} value={description} onChange={e=>setDescription(e.target.value)} placeholder="Ex.: Vinhos para ocasiões especiais"/></label><button className="primary-button" disabled={saving}>{saving?'Salvando...':'Salvar adega'}</button></form></div>}
     {showWineModal&&<div className="modal-backdrop inventory-modal-backdrop" onClick={()=>{if(!saving){setShowWineModal(false);setShowScanner(false);}}}><form className="modal wine-modal" onSubmit={saveWineLot} onClick={e=>e.stopPropagation()}>
-      <div className="modal-head"><div><span className="eyebrow">NOVO ITEM DE ESTOQUE</span><h2>Adicionar vinho</h2></div><button type="button" onClick={()=>setShowWineModal(false)}><X/></button></div>
-      <div className="scan-intro"><div><strong>Identifique o rótulo</strong><span>Leia o código de barras para buscar os dados automaticamente.</span></div><button type="button" className="primary-button" onClick={()=>setShowScanner(true)} disabled={lookupBusy}><ScanLine size={18}/> Escanear</button></div>
-      <div className="barcode-entry"><input aria-label="Código de barras" inputMode="numeric" value={draft.barcode} onChange={e=>setDraft(d=>({...d,barcode:e.target.value.replace(/\D/g,'')}))} placeholder="EAN / UPC — digite o código"/><button type="button" className="secondary-button" onClick={()=>void lookupBarcode(draft.barcode)} disabled={lookupBusy||draft.barcode.length<8}>{lookupBusy?'Buscando...':'Buscar'}</button></div>
+      <div className="modal-head"><div><span className="eyebrow">{editingLotId?'EDITAR ITEM DO ESTOQUE':'NOVO ITEM DE ESTOQUE'}</span><h2>{editingLotId?'Editar vinho':'Adicionar vinho'}</h2></div><button type="button" onClick={()=>setShowWineModal(false)}><X/></button></div>
+      {!editingLotId&&<><div className="scan-intro"><div><strong>Identifique o rótulo</strong><span>Leia o código de barras para buscar os dados automaticamente.</span></div><button type="button" className="primary-button" onClick={()=>setShowScanner(true)} disabled={lookupBusy}><ScanLine size={18}/> Escanear</button></div>
+      <div className="barcode-entry"><input aria-label="Código de barras" inputMode="numeric" value={draft.barcode} onChange={e=>setDraft(d=>({...d,barcode:e.target.value.replace(/\D/g,'')}))} placeholder="EAN / UPC — opcional"/><button type="button" className="secondary-button" onClick={()=>void lookupBarcode(draft.barcode)} disabled={lookupBusy||draft.barcode.length<8}>{lookupBusy?'Buscando...':'Buscar'}</button></div></>}
       {lookupMessage&&<div className="lookup-message">{lookupMessage}{lookupMessage.includes('ELID.wine')&&<> Dados de identidade complementares por <a href="https://elid.wine" target="_blank" rel="noreferrer">ELID.wine</a>.</>}</div>}
       <div className="form-divider"><span>Dados do rótulo</span></div>
       <label>Nome do vinho<input required value={draft.name} onChange={e=>setDraft(d=>({...d,name:e.target.value}))} placeholder="Ex.: Malbec Reserva"/></label>
       <div className="form-grid"><label>Produtor / vinícola<input value={draft.producer} onChange={e=>setDraft(d=>({...d,producer:e.target.value}))} placeholder="Produtor"/></label><label>País de origem<select value={draft.countryId} onChange={e=>setDraft(d=>({...d,countryId:e.target.value}))}><option value="">Selecione o país</option>{countries.map(c=><option key={c.id} value={c.id}>{c.flag_emoji||''} {c.name}</option>)}</select></label></div>
       <div className="form-grid"><label>Tipo<select value={draft.wineType} onChange={e=>setDraft(d=>({...d,wineType:e.target.value}))}><option>Tinto</option><option>Branco</option><option>Rosé</option><option>Espumante</option><option>Fortificado</option><option>Outro</option></select></label><label>Região<input value={draft.region} onChange={e=>setDraft(d=>({...d,region:e.target.value}))} placeholder="Ex.: Mendoza"/></label></div>
       <label>Uvas (separadas por vírgula)<input value={draft.grapes} onChange={e=>setDraft(d=>({...d,grapes:e.target.value}))} placeholder="Malbec, Cabernet Sauvignon"/></label>
+      <div className="form-divider"><span>Foto do vinho / rótulo</span></div>
+      <p className="photo-help">Tire uma foto da garrafa ou do rótulo. A imagem será armazenada na sua área privada do Supabase. Formatos JPG, PNG ou WEBP, até 5 MB. O código de barras também pode ficar em branco no cadastro manual.</p>
+      <label className="photo-picker"><span><Wine size={17}/> {imageFile?'Trocar foto selecionada':'Tirar foto ou escolher imagem'}</span><input type="file" accept="image/*" capture="environment" onChange={e=>selectWineImage(e.target.files?.[0])}/></label>
+      {imagePreview&&<div className="image-preview photo-preview"><img src={imagePreview} alt="Prévia da foto do vinho"/><div><strong>{imageFile?'Nova foto selecionada':'Imagem atual'}</strong><span>{imageFile?imageFile.name:'A imagem já está salva no catálogo'}</span>{imageFile&&<button type="button" className="text-button" onClick={()=>{setImageFile(null);setImagePreview(currentImagePath && /^https?:\/\//i.test(currentImagePath)?currentImagePath:'');}}>Cancelar nova foto</button>}</div></div>}
       <div className="form-divider"><span>Dados do lote e armazenamento</span></div>
       <label>Adega<select required value={selectedCellarId} onChange={e=>setSelectedCellarId(e.target.value)}><option value="">Selecione a adega</option>{cellars.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
       <div className="form-grid three"><label>Safra<input inputMode="numeric" value={draft.vintage} onChange={e=>setDraft(d=>({...d,vintage:e.target.value.replace(/\D/g,'').slice(0,4)}))} placeholder="Ex.: 2022"/></label><label>Quantidade<input type="number" min="1" step="1" required value={draft.quantity} onChange={e=>setDraft(d=>({...d,quantity:Number(e.target.value)}))}/></label><label>Preço por garrafa (R$)<input inputMode="decimal" required value={draft.unitCost} onChange={e=>setDraft(d=>({...d,unitCost:e.target.value}))} placeholder="0,00"/></label></div>
-      {draft.imageUrl&&<div className="image-preview"><img src={draft.imageUrl} alt="Prévia do rótulo"/><span>Imagem localizada na base externa</span></div>}
-      <button className="primary-button submit-lot" disabled={saving||lookupBusy}>{saving?'Salvando no Supabase...':'Salvar no estoque'}</button>
+      <button className="primary-button submit-lot" disabled={saving||lookupBusy}>{saving?'Salvando no Supabase...':editingLotId?'Salvar alterações':'Salvar no estoque'}</button>
     </form></div>}
     {showScanner&&<BarcodeScanner onClose={()=>setShowScanner(false)} onDetected={code=>{setShowScanner(false);void lookupBarcode(code);}}/>}
-    <footer>GESTÃO DE ADEGAS <span>•</span> ETAPA 04 — INVENTÁRIO E LEITURA DE CÓDIGO DE BARRAS</footer>
+    <footer>GESTÃO DE ADEGAS <span>•</span> ETAPA 05 — EDIÇÃO DO INVENTÁRIO E FOTOS DOS RÓTULOS</footer>
   </div>;
 }
 

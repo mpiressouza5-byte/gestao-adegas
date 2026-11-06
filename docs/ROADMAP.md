@@ -23,3 +23,5 @@
 - [ ] Movimentações transacionais via RPC
 
 - [x] Etapa 04.2 — Resolução inteligente de código de barras (ProductGuru + Open Food Facts v3 + ELID.wine).
+
+- [x] Etapa 05 — Edição de vinhos/lotes e captura de fotos para o bucket privado `wine-images`.

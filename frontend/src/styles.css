@@ -28,3 +28,30 @@
 .wine-modal label{margin:12px 0}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.form-grid.three{grid-template-columns:.8fr 1fr 1.2fr}.image-preview{display:flex;align-items:center;gap:10px;background:#faf7fb;border:1px solid var(--line);padding:9px;border-radius:10px;margin-top:12px}.image-preview img{width:48px;height:58px;object-fit:contain;background:#fff;border-radius:6px}.image-preview span{font-size:10px;color:var(--muted)}.submit-lot{width:100%;margin-top:20px;min-height:47px}
 .scanner-backdrop{position:fixed;inset:0;background:#1d1024d9;z-index:30;display:flex;align-items:center;justify-content:center;padding:16px}.scanner-modal{width:min(100%,520px);background:#fff;border-radius:20px;padding:22px;box-shadow:0 20px 60px #0005}.scanner-frame{position:relative;background:#160f19;border-radius:15px;overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center}.scanner-frame video{width:100%;height:100%;object-fit:cover}.scanner-target{position:absolute;width:78%;height:36%;border:2px solid #e9d3ef;border-radius:12px;box-shadow:0 0 0 999px #160f1940}.scanner-frame>span{position:absolute;bottom:12px;left:0;right:0;text-align:center;color:white;font-size:11px;text-shadow:0 1px 4px #000}.scanner-hint{font-size:11px;color:var(--muted);line-height:1.5;margin:12px 0}.scanner-modal .secondary-button{margin-top:4px}
 @media(max-width:760px){.inventory-toolbar{grid-template-columns:1fr 1fr}.inventory-toolbar .search-field{grid-column:1/-1;grid-row:2}.inventory-toolbar>.primary-button{grid-column:1/-1;grid-row:3;width:100%}.inventory-summary{gap:7px}.inventory-summary>div{padding:11px 10px}.inventory-summary strong{font-size:16px}.inventory-summary span{font-size:9px}.inventory-card{align-items:flex-start;gap:10px;padding:11px}.wine-thumb{width:53px;height:70px}.inventory-card-main h3{font-size:14px}.inventory-card-stats{font-size:10px}.inventory-card-stats strong{font-size:10px}.inventory-card-stats span{font-size:9px;white-space:normal;text-align:right}.wine-tags{gap:4px}.wine-tags span{font-size:9px;padding:4px 6px}.wine-modal{border-radius:22px 22px 0 0;max-height:94vh;padding:20px 16px 28px}.inventory-modal-backdrop{align-items:flex-end;padding:0}.form-grid.three{grid-template-columns:1fr 1fr}.form-grid.three label:last-child{grid-column:1/-1}.scan-intro{align-items:flex-start;flex-direction:column}.scan-intro button{width:100%}.scanner-backdrop{padding:0;align-items:flex-end}.scanner-modal{border-radius:22px 22px 0 0;padding:20px 16px 28px}.cellar-card-actions{flex-wrap:wrap}}
+
+
+/* Etapa 05 — edição do cadastro e fotografia do rótulo */
+.inventory-card-stats .edit-wine-button{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  margin-top:5px;padding:7px 10px;border:1px solid #dfd1e4;border-radius:9px;
+  background:#fff;color:var(--wine);font:600 10px 'DM Sans';cursor:pointer
+}
+.inventory-card-stats .edit-wine-button:hover{background:#f5eff7}
+.photo-help{font-size:11px;line-height:1.55;color:var(--muted);margin:0 0 10px}
+.photo-picker{
+  display:flex!important;align-items:center;justify-content:center;
+  min-height:48px;margin:8px 0!important;padding:10px 13px;
+  border:1px dashed #b99ac4;border-radius:11px;background:#faf7fb;
+  color:var(--wine)!important;cursor:pointer
+}
+.photo-picker span{display:flex;align-items:center;gap:8px}
+.photo-picker input{position:absolute!important;width:1px!important;height:1px!important;
+  opacity:0!important;overflow:hidden!important;pointer-events:none}
+.photo-preview{align-items:center}
+.photo-preview>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.photo-preview strong{font-size:11px;color:var(--ink)}
+.photo-preview span{font-size:10px;color:var(--muted);overflow-wrap:anywhere}
+.text-button{align-self:flex-start;border:0;background:none;color:var(--wine);font:600 10px 'DM Sans';padding:3px 0;cursor:pointer}
+@media(max-width:760px){
+  .inventory-card-stats .edit-wine-button{font-size:9px;padding:6px 7px}
+}
