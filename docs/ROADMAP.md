@@ -10,3 +10,14 @@
 8. Exportação Excel.
 9. Testes, segurança e acessibilidade.
 10. Publicação e validação no EasyPanel.
+
+
+## Etapa 04 — Inventário e leitura de código de barras
+- [x] Cadastro inicial de rótulos e lotes
+- [x] Scanner EAN/UPC por câmera
+- [x] Consulta inicial Open Food Facts
+- [x] Filtro por adega e busca por rótulo/código
+- [ ] Testes em aparelhos Android e iOS reais
+- [ ] Estatísticas completas e exportação Excel
+- [ ] Upload e gestão de fotos próprias
+- [ ] Movimentações transacionais via RPC
