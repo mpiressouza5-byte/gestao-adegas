@@ -1,21 +1,25 @@
 # Gestão de Adegas
 
-Aplicação PWA para inventário pessoal de vinhos. Projeto inicial — Etapa 01.
+Aplicação PWA para inventário pessoal de vinhos.
 
 ## Stack
 - Front-end: React + TypeScript + Vite
-- Back-end: Node.js + Express + TypeScript
-- Banco futuro: Supabase PostgreSQL / Auth / Storage
+- Autenticação e dados: Supabase Auth / PostgreSQL
+- API auxiliar: Node.js + Express (estrutura inicial)
 - Deploy: Docker + EasyPanel
 
-## Estrutura
-- `frontend/`: aplicação web mobile-first
-- `backend/`: API REST inicial
-- `database/sql/`: ponto de partida para scripts SQL
-- `docker/`: arquivos de containerização
+## Etapa 03
+- Login, criação de conta, recuperação e atualização de senha.
+- Gestão pessoal de adegas (criar, listar, editar e excluir adegas vazias).
+- Perfil do proprietário.
+- Acesso aos dados protegido por RLS no Supabase.
 
-## Desenvolvimento local
-Requisitos: Node.js 22 LTS ou superior e npm.
+## Configuração local
+Crie `frontend/.env` a partir de `frontend/.env.example` e preencha:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY` (Publishable key ou anon legada)
+
+Nunca use `service_role` ou secret key no navegador.
 
 ```bash
 cd frontend
@@ -23,18 +27,8 @@ npm install
 npm run dev
 ```
 
-API:
-```bash
-cd backend
-npm install
-npm run dev
-```
+## Build Docker / EasyPanel
+O Dockerfile utiliza os argumentos de build `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`. Informe os dois valores na configuração de build do serviço no EasyPanel. São credenciais públicas destinadas ao cliente; a segurança dos dados depende das políticas RLS.
 
-## Deploy
-O `Dockerfile` na raiz compila o front-end e serve os arquivos pelo Nginx. O `docker-compose.yml` pode ser usado como referência de implantação no EasyPanel.
-
-## Variáveis
-Copie `.env.example` para `.env` quando iniciar a configuração dos serviços. Não publique segredos no GitHub.
-
-## Estado da Etapa 01
-Interface demonstrativa, sem autenticação, persistência ou integração real com Supabase. Os vinhos exibidos são dados fictícios para validar a experiência visual.
+## Estado
+Etapa 03 — primeira integração com Supabase. O cadastro de vinhos, lotes, scanner e movimentações será desenvolvido nas próximas etapas.
