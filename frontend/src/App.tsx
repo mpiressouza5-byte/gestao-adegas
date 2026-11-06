@@ -526,6 +526,7 @@ function App() {
             });
             if (imageError) throw imageError;
           }
+          if (!wineId) throw new Error('Não foi possível identificar o vinho para salvar a fotografia.');
           await saveWineImage(wineId);
         }
         const {data:newLot,error:lotError} = await supabase.from('inventory_lots').insert({
