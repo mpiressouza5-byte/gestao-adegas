@@ -7,6 +7,7 @@ import {
   House, ScanLine
 } from 'lucide-react';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
+import { resolveWineBarcode } from './lib/wine-catalog';
 
 
 type AuthMode = 'login' | 'signup' | 'forgot' | 'update-password';
@@ -116,7 +117,7 @@ type Country = { id: number; iso2: string; name: string; flag_emoji: string | nu
 type WineDraft = {
   name: string; producer: string; countryId: string; wineType: string;
   region: string; grapes: string; vintage: string; quantity: number;
-  unitCost: string; barcode: string; imageUrl: string;
+  unitCost: string; barcode: string; imageUrl: string; sourceName: string;
 };
 type InventoryRow = {
   id: string; cellar_id: string; wine_id: string; vintage: number | null;
@@ -130,7 +131,7 @@ type InventoryRow = {
 
 const emptyDraft = (): WineDraft => ({
   name: '', producer: '', countryId: '', wineType: 'Tinto', region: '', grapes: '',
-  vintage: '', quantity: 1, unitCost: '', barcode: '', imageUrl: '',
+  vintage: '', quantity: 1, unitCost: '', barcode: '', imageUrl: '', sourceName: 'Cadastro manual',
 });
 
 function BarcodeScanner({ onDetected, onClose }: { onDetected: (code: string) => void; onClose: () => void }) {
@@ -274,8 +275,9 @@ function App() {
   async function lookupBarcode(rawCode: string) {
     const code = rawCode.replace(/\D/g,'');
     if (!/^\d{8,14}$/.test(code)) { setError('Código inválido. Informe um EAN/UPC com 8 a 14 dígitos.'); return; }
-    setDraft(d=>({...d,barcode:code})); setLookupBusy(true); setLookupMessage('Consultando o código de barras...'); setError('');
+    setDraft(d=>({...d,barcode:code})); setLookupBusy(true); setLookupMessage('Consultando seu catálogo e bases externas...'); setError('');
     try {
+      // 1. Prioridade máxima: catálogo pessoal já confirmado no Supabase.
       const {data:barcodeRow,error:barcodeError} = await supabase.from('wine_barcodes').select('wine_id').eq('barcode',code).maybeSingle();
       if (barcodeError) throw barcodeError;
       if (barcodeRow?.wine_id) {
@@ -287,77 +289,61 @@ function App() {
           producerName = producer?.name || '';
         }
         setExistingWineId(wine.id);
-        setDraft(d=>({...d,name:wine.name,producer:producerName,countryId:wine.country_id?String(wine.country_id):'',wineType:wine.wine_type||'Tinto',region:wine.region||'',grapes:(wine.grapes||[]).join(', '),barcode:code}));
-        setLookupMessage('Este rótulo já está cadastrado. Informe a safra, quantidade e preço para adicionar um novo lote.');
+        setDraft(d=>({...d,name:wine.name,producer:producerName,countryId:wine.country_id?String(wine.country_id):'',wineType:wine.wine_type||'Tinto',region:wine.region||'',grapes:(wine.grapes||[]).join(', '),barcode:code,sourceName:'Catálogo pessoal Supabase'}));
+        setLookupMessage('Rótulo encontrado no seu catálogo pessoal. Informe safra, quantidade e preço para adicionar um novo lote.');
         return;
       }
-      // Catálogo auxiliar de rótulos verificados. A base Open Food Facts é colaborativa
-      // e pode não conter vinhos que estão disponíveis em catálogos comerciais.
+
+      // 2. Catálogo auxiliar de rótulos verificados e já confirmados.
       const verifiedFallbacks: Record<string, {
         name: string; producer: string; iso2: string; wineType: string;
         region: string; grapes: string[]; imageUrl: string; source: string;
       }> = {
         '8410415580011': {
-          name: 'Pata Negra Oro Rosé',
-          producer: 'Pata Negra',
-          iso2: 'ES',
-          wineType: 'Rosé',
-          region: 'Valdepeñas',
-          grapes: ['Tempranillo'],
+          name: 'Pata Negra Oro Rosé', producer: 'Pata Negra', iso2: 'ES',
+          wineType: 'Rosé', region: 'Valdepeñas', grapes: ['Tempranillo'],
           imageUrl: 'https://www.imigrantesbebidas.com.br/img/bebida/images/products/full/20256-vinho-pata-negra-oro-rose-750ml.20251013101722.jpg?p=product_regular&s=9bbf763f0be540c8e5d681a7d378177d',
-          source: 'Catálogo comercial Imigrantes Bebidas',
+          source: 'Catálogo comercial verificado',
         },
       };
-
       const fallback = verifiedFallbacks[code];
       if (fallback) {
         const country = countries.find(c => c.iso2.trim().toUpperCase() === fallback.iso2);
         setExistingWineId(null);
-        setDraft(d => ({
-          ...d,
-          name: fallback.name,
-          producer: fallback.producer,
-          countryId: country ? String(country.id) : '',
-          wineType: fallback.wineType,
-          region: fallback.region,
-          grapes: fallback.grapes.join(', '),
-          imageUrl: fallback.imageUrl,
-          barcode: code,
-        }));
-        setLookupMessage(`Rótulo identificado em catálogo auxiliar (${fallback.source}). Confira os dados e complete safra, quantidade e preço.`);
+        setDraft(d => ({...d,name:fallback.name,producer:fallback.producer,countryId:country?String(country.id):'',wineType:fallback.wineType,region:fallback.region,grapes:fallback.grapes.join(', '),imageUrl:fallback.imageUrl,barcode:code,sourceName:fallback.source}));
+        setLookupMessage(`Rótulo identificado em catálogo verificado (${fallback.source}). Confira os dados antes de salvar.`);
         return;
       }
 
-      const fields = 'code,product_name,product_name_pt,product_name_en,brands,origins,origins_tags,image_front_url,image_url,categories,categories_tags,quantity,alcohol_value';
-      const response = await fetch(`https://world.openfoodfacts.org/api/v3.6/product/${encodeURIComponent(code)}.json?fields=${fields}`);
-      if (response.status === 404) {
+      // 3. Resolver em cascata: ProductGuru (EAN), Open Food Facts (EAN),
+      // e ELID (nome/identidade de vinho, apenas para enriquecer uma identificação prévia).
+      const result = await resolveWineBarcode(code);
+      if (!result) {
         setExistingWineId(null);
-        setLookupMessage('Este código não consta no Open Food Facts nem no catálogo auxiliar. O código foi lido corretamente; complete os dados manualmente e salve para adicioná-lo ao seu catálogo pessoal.');
+        setDraft(d=>({...d,barcode:code,sourceName:'Cadastro manual'}));
+        setLookupMessage('Não encontramos este código nas bases consultadas. O código foi lido corretamente; complete os dados manualmente. Após salvar, ele ficará disponível no seu catálogo pessoal.');
         return;
       }
-      if (!response.ok) throw new Error(`Consulta externa indisponível (HTTP ${response.status}).`);
-      const payload = await response.json();
-      if (payload.status !== 1 || !payload.product) {
-        setLookupMessage('Código não encontrado na base externa. Preencha os dados do rótulo manualmente; o código será salvo no seu catálogo.');
-        setExistingWineId(null);
-        return;
-      }
-      const product = payload.product;
-      const name = product.product_name_pt || product.product_name || product.product_name_en || '';
-      const producer = product.brands?.split(',')[0]?.trim() || '';
-      const originText = [product.origins, ...(product.origins_tags||[])].filter(Boolean).join(' ').toLowerCase();
-      const countryAliases: Record<string,string[]> = { AR:['argentina'], AU:['australia'], BR:['brazil'], CL:['chile'], ES:['spain'], FR:['france'], IT:['italy'], PT:['portugal'], US:['united states','usa'], UY:['uruguay'], ZA:['south africa'], DE:['germany'], NZ:['new zealand'] };
-      const country = countries.find(c => [c.name.toLowerCase(),c.iso2.toLowerCase(),...(countryAliases[c.iso2.trim()]||[])].some(alias=>originText.includes(alias)));
-      const categoryText = `${product.categories||''} ${(product.categories_tags||[]).join(' ')}`.toLowerCase();
-      const wineType = categoryText.includes('sparkling') || categoryText.includes('espumante') ? 'Espumante' :
-        categoryText.includes('rosé') || categoryText.includes('rose') ? 'Rosé' :
-        categoryText.includes('white') || categoryText.includes('branco') ? 'Branco' :
-        categoryText.includes('red') || categoryText.includes('tinto') ? 'Tinto' : 'Outro';
+
+      const country = result.countryIso2
+        ? countries.find(c => c.iso2.trim().toUpperCase() === result.countryIso2!.toUpperCase())
+        : countries.find(c => result.countryName && c.name.toLowerCase() === result.countryName.toLowerCase());
       setExistingWineId(null);
-      setDraft(d=>({...d,name,producer,countryId:country?String(country.id):'',wineType,imageUrl:product.image_front_url||product.image_url||'',barcode:code}));
-      setLookupMessage(name ? 'Produto encontrado. Confira os dados: bases colaborativas podem conter informações incompletas.' : 'Código encontrado, mas sem nome de rótulo. Complete os dados manualmente.');
+      setDraft(d=>({
+        ...d,
+        name:result.name || d.name,
+        producer:result.producer || d.producer,
+        countryId:country ? String(country.id) : d.countryId,
+        wineType:result.wineType || d.wineType,
+        region:result.region || d.region,
+        grapes:result.grapes?.join(', ') || d.grapes,
+        imageUrl:result.imageUrl || d.imageUrl,
+        barcode:code,
+        sourceName:result.sources.join(' + '),
+      }));
+      setLookupMessage(`${result.name ? 'Produto identificado' : 'Encontramos alguns dados do produto'} em: ${result.sources.join(', ')}. Confirme os campos; dados não confirmados podem estar incompletos.`);
     } catch (err) {
-      setLookupMessage(`Não foi possível consultar automaticamente: ${err instanceof Error?err.message:'erro desconhecido'}. Você pode preencher o rótulo manualmente.`);
+      setLookupMessage(`As consultas externas falharam: ${err instanceof Error?err.message:'erro desconhecido'}. O código foi preservado; você pode preencher os dados manualmente.`);
     } finally { setLookupBusy(false); }
   }
 
@@ -390,7 +376,7 @@ function App() {
           user_id:session!.user.id,name:draft.name.trim(),producer_id:producerId,
           country_id:draft.countryId?Number(draft.countryId):null,wine_type:draft.wineType,
           region:draft.region.trim()||null,grapes:draft.grapes.split(',').map(v=>v.trim()).filter(Boolean),
-          source_name:'Catálogo externo / cadastro manual',source_product_id:draft.barcode,
+          source_name:draft.sourceName || 'Cadastro manual',source_product_id:draft.barcode,
         }).select('id').single();
         if (wineError) throw wineError;
         wineId = newWine.id;
@@ -463,7 +449,7 @@ function App() {
       <div className="modal-head"><div><span className="eyebrow">NOVO ITEM DE ESTOQUE</span><h2>Adicionar vinho</h2></div><button type="button" onClick={()=>setShowWineModal(false)}><X/></button></div>
       <div className="scan-intro"><div><strong>Identifique o rótulo</strong><span>Leia o código de barras para buscar os dados automaticamente.</span></div><button type="button" className="primary-button" onClick={()=>setShowScanner(true)} disabled={lookupBusy}><ScanLine size={18}/> Escanear</button></div>
       <div className="barcode-entry"><input aria-label="Código de barras" inputMode="numeric" value={draft.barcode} onChange={e=>setDraft(d=>({...d,barcode:e.target.value.replace(/\D/g,'')}))} placeholder="EAN / UPC — digite o código"/><button type="button" className="secondary-button" onClick={()=>void lookupBarcode(draft.barcode)} disabled={lookupBusy||draft.barcode.length<8}>{lookupBusy?'Buscando...':'Buscar'}</button></div>
-      {lookupMessage&&<div className="lookup-message">{lookupMessage}</div>}
+      {lookupMessage&&<div className="lookup-message">{lookupMessage}{lookupMessage.includes('ELID.wine')&&<> Dados de identidade complementares por <a href="https://elid.wine" target="_blank" rel="noreferrer">ELID.wine</a>.</>}</div>}
       <div className="form-divider"><span>Dados do rótulo</span></div>
       <label>Nome do vinho<input required value={draft.name} onChange={e=>setDraft(d=>({...d,name:e.target.value}))} placeholder="Ex.: Malbec Reserva"/></label>
       <div className="form-grid"><label>Produtor / vinícola<input value={draft.producer} onChange={e=>setDraft(d=>({...d,producer:e.target.value}))} placeholder="Produtor"/></label><label>País de origem<select value={draft.countryId} onChange={e=>setDraft(d=>({...d,countryId:e.target.value}))}><option value="">Selecione o país</option>{countries.map(c=><option key={c.id} value={c.id}>{c.flag_emoji||''} {c.name}</option>)}</select></label></div>

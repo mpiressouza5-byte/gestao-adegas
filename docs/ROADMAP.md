@@ -21,3 +21,5 @@
 - [ ] Estatísticas completas e exportação Excel
 - [ ] Upload e gestão de fotos próprias
 - [ ] Movimentações transacionais via RPC
+
+- [x] Etapa 04.2 — Resolução inteligente de código de barras (ProductGuru + Open Food Facts v3 + ELID.wine).

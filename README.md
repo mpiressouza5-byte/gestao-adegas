@@ -43,5 +43,5 @@ Configure `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` na seção Environment 
 Etapa 03 — primeira integração com Supabase. Etapa 04 implementa o primeiro fluxo de cadastro de vinhos, lotes e leitura de código de barras. Estatísticas, relatórios e movimentações completas permanecem no roadmap.
 
 
-### Etapa 04 — cobertura auxiliar do leitor
-O leitor agora reconhece o EAN `8410415580011` (Pata Negra Oro Rosé) por catálogo auxiliar verificado quando o rótulo não consta no Open Food Facts. Respostas HTTP 404 são tratadas como ausência de cadastro externo, não como falha de leitura.
+## Etapa 04.2 — Resolução de códigos de barras
+Consulta em cascata: catálogo Supabase, catálogo auxiliar, ProductGuru, Open Food Facts v3 e enriquecimento por ELID.wine. O Nginx usa proxy same-origin para as APIs externas. Consulte `docs/ETAPA-04-2.md` para limites, licenças, proveniência e testes.
