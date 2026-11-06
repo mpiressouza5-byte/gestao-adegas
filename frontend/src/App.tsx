@@ -291,8 +291,50 @@ function App() {
         setLookupMessage('Este rótulo já está cadastrado. Informe a safra, quantidade e preço para adicionar um novo lote.');
         return;
       }
+      // Catálogo auxiliar de rótulos verificados. A base Open Food Facts é colaborativa
+      // e pode não conter vinhos que estão disponíveis em catálogos comerciais.
+      const verifiedFallbacks: Record<string, {
+        name: string; producer: string; iso2: string; wineType: string;
+        region: string; grapes: string[]; imageUrl: string; source: string;
+      }> = {
+        '8410415580011': {
+          name: 'Pata Negra Oro Rosé',
+          producer: 'Pata Negra',
+          iso2: 'ES',
+          wineType: 'Rosé',
+          region: 'Valdepeñas',
+          grapes: ['Tempranillo'],
+          imageUrl: 'https://www.imigrantesbebidas.com.br/img/bebida/images/products/full/20256-vinho-pata-negra-oro-rose-750ml.20251013101722.jpg?p=product_regular&s=9bbf763f0be540c8e5d681a7d378177d',
+          source: 'Catálogo comercial Imigrantes Bebidas',
+        },
+      };
+
+      const fallback = verifiedFallbacks[code];
+      if (fallback) {
+        const country = countries.find(c => c.iso2.trim().toUpperCase() === fallback.iso2);
+        setExistingWineId(null);
+        setDraft(d => ({
+          ...d,
+          name: fallback.name,
+          producer: fallback.producer,
+          countryId: country ? String(country.id) : '',
+          wineType: fallback.wineType,
+          region: fallback.region,
+          grapes: fallback.grapes.join(', '),
+          imageUrl: fallback.imageUrl,
+          barcode: code,
+        }));
+        setLookupMessage(`Rótulo identificado em catálogo auxiliar (${fallback.source}). Confira os dados e complete safra, quantidade e preço.`);
+        return;
+      }
+
       const fields = 'code,product_name,product_name_pt,product_name_en,brands,origins,origins_tags,image_front_url,image_url,categories,categories_tags,quantity,alcohol_value';
       const response = await fetch(`https://world.openfoodfacts.org/api/v3.6/product/${encodeURIComponent(code)}.json?fields=${fields}`);
+      if (response.status === 404) {
+        setExistingWineId(null);
+        setLookupMessage('Este código não consta no Open Food Facts nem no catálogo auxiliar. O código foi lido corretamente; complete os dados manualmente e salve para adicioná-lo ao seu catálogo pessoal.');
+        return;
+      }
       if (!response.ok) throw new Error(`Consulta externa indisponível (HTTP ${response.status}).`);
       const payload = await response.json();
       if (payload.status !== 1 || !payload.product) {
@@ -348,7 +390,7 @@ function App() {
           user_id:session!.user.id,name:draft.name.trim(),producer_id:producerId,
           country_id:draft.countryId?Number(draft.countryId):null,wine_type:draft.wineType,
           region:draft.region.trim()||null,grapes:draft.grapes.split(',').map(v=>v.trim()).filter(Boolean),
-          source_name:'Open Food Facts / cadastro manual',source_product_id:draft.barcode,
+          source_name:'Catálogo externo / cadastro manual',source_product_id:draft.barcode,
         }).select('id').single();
         if (wineError) throw wineError;
         wineId = newWine.id;

@@ -7,8 +7,9 @@
 - Leitura de EAN/UPC pela câmera com `@zxing/browser` (requer HTTPS e permissão de câmera).
 - Entrada manual do código de barras como alternativa à câmera.
 - Consulta de produto por código na API Open Food Facts v3.6.
+- Catálogo auxiliar local de rótulos verificados para cobrir produtos ausentes na base colaborativa (inclui Pata Negra Oro Rosé, EAN 8410415580011).
 - Se o código já estiver associado a um vinho do catálogo acessível ao usuário, reutiliza o cadastro e cria apenas um novo lote.
-- Se não houver resultado externo, permite preencher o rótulo manualmente e salvar o código.
+- Se não houver resultado externo, trata HTTP 404 como produto ausente (não como falha do scanner) e permite preencher o rótulo manualmente e salvar o código. Rótulos confirmados podem ser adicionados ao catálogo auxiliar com a fonte registrada na documentação.
 - Registro em `wines`, `wine_barcodes`, `wine_images`, `inventory_lots` e `stock_movements`.
 - Dados privados por usuário, respeitando as políticas RLS existentes.
 
@@ -62,3 +63,16 @@ Não é necessária chave de API para consultas públicas de leitura do Open Foo
 - A câmera depende de navegador compatível, HTTPS e permissão do usuário. A entrada manual é alternativa obrigatória.
 - O registro do lote e do movimento inicial são duas chamadas separadas. Se o movimento falhar, o lote permanece salvo e o erro é registrado no console; a consistência transacional será reforçada na etapa de movimentações via RPC.
 - Exportação Excel, estatísticas detalhadas, edição/exclusão de lotes e upload de imagens próprias ficam para etapas posteriores.
+
+
+## Catálogo auxiliar — primeiro caso validado
+- EAN: `8410415580011`
+- Rótulo: Pata Negra Oro Rosé
+- Produtor/marca: Pata Negra
+- País: Espanha
+- Região: Valdepeñas
+- Uva: Tempranillo
+- Tipo: Rosé
+- Imagem: imagem de produto hospedada por Imigrantes Bebidas.
+- Fontes de conferência: ficha de produto do importador Casa Flora e página comercial Imigrantes Bebidas.
+- A safra, preço pago e quantidade continuam sendo informados pelo usuário; não são inferidos do catálogo.
