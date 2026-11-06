@@ -10,11 +10,14 @@
 - Exclusão de adegas somente quando não houver lotes vinculados.
 - Edição do nome do perfil.
 
-## Variáveis do front-end
+## Variáveis no EasyPanel
+Configure no serviço App, seção Environment:
 - `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
+- `VITE_SUPABASE_ANON_KEY` (recebe a Publishable key `sb_publishable_...` ou a chave pública legada `anon`)
 
-Use a Publishable key (`sb_publishable_...`) ou a chave pública legada `anon`. Nunca use `service_role` ou secret key no front-end.
+O container gera `/runtime-config.js` ao iniciar, usando as variáveis de ambiente em tempo de execução. Assim, a configuração não depende de variáveis Vite disponíveis durante o build.
+
+Não use `service_role` ou secret key no navegador.
 
 ## Configuração de autenticação Supabase
 Em Authentication > URL Configuration:
@@ -23,5 +26,11 @@ Em Authentication > URL Configuration:
 
 Para recuperação de senha, configure o template de e-mail para apontar para a URL do aplicativo.
 
-## Publicação Docker
-O Dockerfile aceita os build arguments `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`. Como Vite incorpora variáveis `VITE_` durante o build, defina os dois valores na configuração de build do EasyPanel e faça rebuild após alterar.
+## Publicação Docker / EasyPanel
+- Build Path: `/`
+- Dockerfile Path: `Dockerfile`
+- Internal port: `80`
+- Configure as duas variáveis na seção Environment do serviço.
+- Salve e faça Deploy / Force Rebuild.
+- O script `docker/40-runtime-config.sh` é executado pelo entrypoint oficial do Nginx em cada inicialização e escreve a configuração do navegador.
+- O Nginx envia `Cache-Control: no-store` para `runtime-config.js` e `index.html`, evitando que o navegador reutilize uma configuração antiga.

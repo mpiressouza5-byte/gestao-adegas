@@ -28,7 +28,7 @@ npm run dev
 ```
 
 ## Build Docker / EasyPanel
-O Dockerfile utiliza os argumentos de build `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`. Informe os dois valores na configuração de build do serviço no EasyPanel. São credenciais públicas destinadas ao cliente; a segurança dos dados depende das políticas RLS.
+Configure `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` na seção Environment do serviço EasyPanel. O container gera `runtime-config.js` ao iniciar, lendo essas variáveis em tempo de execução; não é necessário passá-las como argumentos de build. Internal port: `80`. São valores públicos destinados ao cliente; a segurança dos dados depende das políticas RLS.
 
 ## Estado
 Etapa 03 — primeira integração com Supabase. O cadastro de vinhos, lotes, scanner e movimentações será desenvolvido nas próximas etapas.
